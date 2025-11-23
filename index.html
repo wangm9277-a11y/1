@@ -1,10 +1,25 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-  <head>
+<head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Pixel TCM Healer</title>
+    <title>Pixel TCM Healer - Endless Mode</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Import Map: Fixed to ensure only React 18 is loaded to prevent version conflicts -->
+    <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0"
+  }
+}
+</script>
+
     <style>
       @import url('https://fonts.googleapis.com/css2?family=VT323&family=Noto+Serif+SC:wght@700&display=swap');
       
@@ -16,7 +31,7 @@
       }
       
       .pixel-font-zh {
-        font-family: 'Noto Serif SC', serif; /* Fallback for Chinese characters to look somewhat retro/serif */
+        font-family: 'Noto Serif SC', serif;
         letter-spacing: 0.05em;
       }
 
@@ -39,7 +54,6 @@
         z-index: 50;
       }
       
-      /* Pixel Art Utilities */
       .pixel-border {
         box-shadow: 
           -4px 0 0 0 #000,
@@ -48,25 +62,547 @@
           0 4px 0 0 #000;
         margin: 4px;
       }
-      
-      .pixel-btn:active {
-        transform: translateY(4px);
-        box-shadow: none;
+
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
       }
     </style>
-  <script type="importmap">
-{
-  "imports": {
-    "react": "https://aistudiocdn.com/react@^19.2.0",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0"
-  }
-}
-</script>
 </head>
-  <body>
+<body>
     <div id="root"></div>
     <div class="scanlines"></div>
-  </body>
+
+    <script type="text/babel" data-type="module" data-presets="typescript,react">
+        import React, { useState, useEffect, useMemo, useCallback } from 'react';
+        import { createRoot } from 'react-dom/client';
+
+        // --- GAME DATA ENGINE (The "1000 Cases" Source) ---
+        // Instead of hardcoding 1000 strings, we use procedural generation 
+        // based on TCM patterns (Zheng). This creates thousands of valid combinations.
+        
+        const TCM_DATABASE = [
+          {
+            diagnosis: "脾气虚证",
+            faces: ["面色萎黄", "面色淡白", "面色无华"],
+            tongues: ["舌淡，苔薄白", "舌淡胖，边有齿痕", "舌质淡嫩"],
+            pulses: ["脉缓弱", "脉细弱", "脉虚无力"],
+            complaints: [
+              "大夫，我最近一点胃口都没有，吃一点东西肚子就胀。",
+              "整天感觉没劲，懒得说话，大便也总是稀稀拉拉的。",
+              "感觉身体很沉，吃完饭就想躺着，肚子胀得难受。",
+              "最近太累了，肢体倦怠，干一点活就气喘吁吁的。"
+            ],
+            explanation: "脾主运化，脾气亏虚则纳少腹胀、便溏；脾主肌肉四肢，气虚则神疲乏力、肢体倦怠；面色萎黄、舌淡脉弱均为气血生化不足之象。"
+          },
+          {
+            diagnosis: "肝火炽盛证",
+            faces: ["面红目赤", "面色红赤"],
+            tongues: ["舌质红，苔黄", "舌红，苔黄燥", "舌边红赤"],
+            pulses: ["脉弦数", "脉弦有力", "脉洪数"],
+            complaints: [
+              "头胀痛得厉害，耳朵里嗡嗡响，嘴里发苦。",
+              "最近脾气特别大，控制不住，两边肋骨这块也疼。",
+              "眼睛红肿疼痛，晚上睡不着觉，总是做噩梦。",
+              "小便黄，大便干，感觉身体里像有火在烧，烦躁得很。"
+            ],
+            explanation: "肝火上炎，扰动清窍，故见头晕胀痛、耳鸣、面红目赤；肝火横逆，故见胁痛；热扰心神则失眠多梦；舌红苔黄脉弦数均为实火之象。"
+          },
+          {
+            diagnosis: "肾阳虚证",
+            faces: ["面色晄白", "面色黧黑", "面色淡白无华"],
+            tongues: ["舌淡胖，苔白滑", "舌质淡嫩"],
+            pulses: ["脉沉迟无力", "脉弱", "脉沉细"],
+            complaints: [
+              "腰膝酸软冷痛，特别怕冷，手脚怎么也捂不热。",
+              "晚上起夜次数特别多，尿色清长，腰像断了一样疼。",
+              "感觉精神萎靡，总是想睡觉，稍微动动就气短。",
+              "最近有些拉肚子，尤其是早晨五点多钟，肚子一疼就得去厕所。"
+            ],
+            explanation: "肾阳亏虚，温煦失职，故见畏寒肢冷、腰膝冷痛；阳虚气化无权，故见夜尿频多；五更泄泻亦为肾阳虚衰，火不暖土所致。"
+          },
+          {
+            diagnosis: "肾阴虚证",
+            faces: ["两颧潮红", "面色潮红"],
+            tongues: ["舌红少苔", "舌红无苔", "舌质红绛"],
+            pulses: ["脉细数", "脉细数无力"],
+            complaints: [
+              "手心脚心发热，晚上睡觉出汗特别多。",
+              "腰膝酸软，头晕耳鸣，感觉嘴里特别干。",
+              "心里烦躁，睡不着觉，记忆力也下降了。",
+              "感觉骨头里往外透着热，午后尤其明显。"
+            ],
+            explanation: "肾阴亏虚，虚热内扰，故见五心烦热、潮热盗汗；阴虚津亏，故见口干咽燥；腰为肾之府，肾虚则腰膝酸软；舌红少苔脉细数为阴虚内热之象。"
+          },
+          {
+            diagnosis: "肺气虚证",
+            faces: ["面色淡白", "面色晄白"],
+            tongues: ["舌淡苔白", "舌体胖大"],
+            pulses: ["脉虚", "脉弱"],
+            complaints: [
+              "稍微动一下就出汗，特别容易感冒。",
+              "咳嗽没力气，痰是清稀的，说话声音也很低。",
+              "总感觉气不够用，胸闷，怕风怕冷。",
+              "整天没精神，声音低怯，不想动弹。"
+            ],
+            explanation: "肺主气司呼吸，肺气虚则咳喘无力、气短、声低；卫表不固则自汗、易感冒；面色淡白、舌淡脉弱均为气虚之象。"
+          },
+          {
+            diagnosis: "心血虚证",
+            faces: ["面色淡白无华", "面色萎黄"],
+            tongues: ["舌淡，苔薄白", "舌质淡白"],
+            pulses: ["脉细弱", "脉结代"],
+            complaints: [
+              "心慌心悸，感觉心都要跳出来了，尤其是劳累以后。",
+              "晚上睡不好，总是做梦，有时候醒了就再也睡不着。",
+              "记性越来越差，刚做的事转头就忘，头也晕。",
+              "脸色不好看，嘴唇也没有血色，常常觉得心神不宁。"
+            ],
+            explanation: "心主血脉，血虚心神失养，故见心悸怔忡、失眠多梦、健忘；血虚不能上荣面目，故见面色淡白、眩晕；舌淡脉细均为血虚之象。"
+          },
+          {
+            diagnosis: "痰湿中阻证",
+            faces: ["面色淡黄而虚浮", "面垢多油"],
+            tongues: ["舌体胖大，苔白腻", "苔白滑腻"],
+            pulses: ["脉滑", "脉濡缓"],
+            complaints: [
+              "头晕沉沉的，像裹了块布一样，不清醒。",
+              "嗓子里总有痰，吐不完，胸口闷闷的，恶心想吐。",
+              "身体困重，不想动，吃一点油腻的就难受。",
+              "肚子胀，大便黏腻粘马桶，总觉得睡不醒。"
+            ],
+            explanation: "痰湿内阻，清阳不升，故见头重如裹、眩晕；湿困脾胃，运化失司，故见胸闷纳呆、恶心呕吐；苔白腻、脉滑均为痰湿之象。"
+          },
+          {
+            diagnosis: "肝郁气滞证",
+            faces: ["面色晦暗", "神情抑郁"],
+            tongues: ["舌淡红，苔薄白", "舌边有瘀点"],
+            pulses: ["脉弦", "脉弦细"],
+            complaints: [
+              "总是唉声叹气的，感觉胸胁胀满疼痛。",
+              "心情不好，稍微有点事就想发火，或者想哭。",
+              "嗓子里像有个梅核堵着，咽不下去也吐不出来。",
+              "女同志：月经不调，乳房胀痛得厉害。"
+            ],
+            explanation: "肝主疏泄，气机郁滞，故见情志抑郁、喜太息、胸胁胀痛；气滞痰凝则见梅核气；脉弦为肝郁之典型脉象。"
+          },
+          {
+            diagnosis: "血瘀证",
+            faces: ["面色黧黑", "唇甲青紫", "面部有瘀斑"],
+            tongues: ["舌质紫暗", "有瘀点瘀斑", "舌下静脉曲张"],
+            pulses: ["脉涩", "脉结代"],
+            complaints: [
+              "身体某个地方刺痛，位置固定，晚上疼得更厉害。",
+              "以前受过伤，现在那地方还是疼，按着更疼。",
+              "皮肤上莫名其妙出现青紫的斑块，嘴唇也紫。",
+              "女同志：痛经厉害，血块多，颜色紫黑。"
+            ],
+            explanation: "瘀血阻滞脉络，不通则痛，故见刺痛、痛处固定、夜间加重；血行不畅，瘀阻肌肤，故见唇甲青紫、舌质紫暗、脉涩。"
+          },
+          {
+            diagnosis: "胃火炽盛证",
+            faces: ["面赤", "牙龈肿痛"],
+            tongues: ["舌红，苔黄燥", "舌质红"],
+            pulses: ["脉滑数", "脉洪数"],
+            complaints: [
+              "胃里火烧火燎的疼，想喝凉水。",
+              "牙龈肿痛出血，嘴里有臭味，大便干结。",
+              "吃得多但还是饿得快，肚子却胀痛。",
+              "恶心，有时候还会反酸水，心里烦躁。"
+            ],
+            explanation: "胃火内盛，腐熟太过，故见消谷善饥；火邪上炎，故见牙龈肿痛、口臭；热灼津液，故见便秘、口渴喜冷饮；舌红苔黄脉数均为实热之象。"
+          }
+        ];
+
+        const LAST_NAMES = ["张", "李", "王", "赵", "刘", "陈", "杨", "黄", "吴", "周", "徐", "孙", "马", "朱", "胡"];
+        const FIRST_NAMES_M = ["伟", "强", "军", "磊", "洋", "勇", "杰", "峰", "平", "明"];
+        const FIRST_NAMES_F = ["芳", "娜", "敏", "静", "秀", "娟", "英", "华", "丽", "艳"];
+
+        // --- GAME LOGIC ---
+
+        const generateRandomName = () => {
+          const lastName = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)];
+          const isMale = Math.random() > 0.5;
+          const firstName = isMale 
+            ? FIRST_NAMES_M[Math.floor(Math.random() * FIRST_NAMES_M.length)]
+            : FIRST_NAMES_F[Math.floor(Math.random() * FIRST_NAMES_F.length)];
+          return lastName + firstName;
+        };
+
+        const getRandomItem = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+        // Core Procedural Generator
+        const generateLocalCase = () => {
+          // 1. Pick a Correct Diagnosis (Syndrome)
+          const syndrome = getRandomItem(TCM_DATABASE);
+          
+          // 2. Pick specific symptoms from valid options for this syndrome
+          const face = getRandomItem(syndrome.faces);
+          const tongue = getRandomItem(syndrome.tongues);
+          const pulse = getRandomItem(syndrome.pulses);
+          const complaint = getRandomItem(syndrome.complaints);
+
+          // 3. Generate Wrong Options (pick 3 other random diagnoses)
+          const otherDiagnoses = TCM_DATABASE
+            .filter(item => item.diagnosis !== syndrome.diagnosis)
+            .map(item => item.diagnosis);
+          
+          // Shuffle and take 3
+          const wrongOptions = otherDiagnoses
+            .sort(() => 0.5 - Math.random())
+            .slice(0, 3);
+
+          return {
+            patientName: generateRandomName(),
+            appearance: { face, tongue, pulse },
+            complaint,
+            correctDiagnosis: syndrome.diagnosis,
+            wrongOptions,
+            explanation: syndrome.explanation
+          };
+        };
+
+        // --- COMPONENTS ---
+
+        // interface PixelCardProps {
+        //   children: React.ReactNode;
+        //   className?: string;
+        //   title?: string;
+        //   variant?: 'default' | 'primary' | 'danger' | 'success' | 'dark';
+        // }
+
+        const PixelCard = ({ 
+          children, 
+          className = '', 
+          title,
+          variant = 'default' 
+        }) => {
+          const getBorderColor = () => {
+            switch (variant) {
+              case 'primary': return 'border-amber-900 bg-amber-100 text-gray-900';
+              case 'danger': return 'border-red-900 bg-red-50 text-gray-900';
+              case 'success': return 'border-green-900 bg-green-50 text-gray-900';
+              case 'dark': return 'border-gray-600 bg-black text-white'; 
+              default: return 'border-gray-800 bg-[#dfdcd6] text-gray-900';
+            }
+          };
+
+          const getTitleStyle = () => {
+            if (variant === 'default' || variant === 'dark') {
+              return 'bg-gray-800 text-white';
+            }
+            return 'bg-inherit text-black font-bold';
+          };
+
+          return (
+            <div className={`relative p-1 ${className}`}>
+              <div className={`border-4 ${getBorderColor()} shadow-[6px_6px_0_0_rgba(0,0,0,0.4)] relative transition-colors duration-300`}>
+                {title && (
+                  <div className={`px-2 py-1 border-b-4 border-inherit ${getTitleStyle()}`}>
+                     <h3 className="font-bold tracking-wider text-sm md:text-base font-serif">{title}</h3>
+                  </div>
+                )}
+                <div className="p-4">
+                  {children}
+                </div>
+                {/* Decorative Pixel Corners */}
+                <div className="absolute -top-1 -left-1 w-2 h-2 bg-black"></div>
+                <div className="absolute -top-1 -right-1 w-2 h-2 bg-black"></div>
+                <div className="absolute -bottom-1 -left-1 w-2 h-2 bg-black"></div>
+                <div className="absolute -bottom-1 -right-1 w-2 h-2 bg-black"></div>
+              </div>
+            </div>
+          );
+        };
+
+        const PatientAvatar = ({ faceDesc }) => {
+          let faceColor = 'bg-[#eec0b0]';
+          if (faceDesc.includes('红') || faceDesc.includes('赤')) faceColor = 'bg-[#ff9999]';
+          if (faceDesc.includes('白') || faceDesc.includes('萎') || faceDesc.includes('晄')) faceColor = 'bg-[#f0f0e0]';
+          if (faceDesc.includes('黄')) faceColor = 'bg-[#eadcae]';
+          if (faceDesc.includes('黑') || faceDesc.includes('暗') || faceDesc.includes('紫')) faceColor = 'bg-[#a09090]';
+
+          return (
+            <div className="w-32 h-32 mx-auto relative mb-4 animate-[bounce_3s_infinite]">
+                <div className={`w-24 h-24 absolute top-4 left-4 ${faceColor} shadow-[4px_0_0_0_#000,-4px_0_0_0_#000,0_-4px_0_0_#000,0_4px_0_0_#000]`}>
+                   <div className="absolute top-8 left-4 w-4 h-2 bg-black"></div>
+                   <div className="absolute top-8 right-4 w-4 h-2 bg-black"></div>
+                   <div className="absolute top-12 left-10 w-4 h-4 bg-black/20"></div>
+                   <div className="absolute bottom-6 left-8 w-8 h-2 bg-black/60"></div>
+                </div>
+                <div className="absolute bottom-0 left-0 w-32 h-6 bg-blue-800 rounded-t-lg"></div>
+            </div>
+          );
+        };
+
+        const PatientView = ({ patientData }) => {
+          return (
+            <div className="flex flex-col md:flex-row gap-4 w-full max-w-4xl mx-auto">
+              <div className="w-full md:w-1/3 flex flex-col items-center">
+                <PixelCard className="w-full" title={`患者: ${patientData.patientName}`}>
+                  <PatientAvatar faceDesc={patientData.appearance.face} />
+                  <div className="text-center mt-2 font-bold text-gray-800">
+                    "大夫，请帮帮我..."
+                  </div>
+                </PixelCard>
+              </div>
+              <div className="w-full md:w-2/3">
+                <PixelCard className="h-full bg-amber-50" title="四诊信息 (Observation)">
+                  <div className="space-y-4 font-serif text-lg text-gray-900">
+                    <div className="flex items-start">
+                      <span className="bg-red-800 text-white px-2 py-0.5 mr-3 text-sm font-bold pixel-border shrink-0">望诊 (面)</span>
+                      <span>{patientData.appearance.face}</span>
+                    </div>
+                    <div className="flex items-start">
+                      <span className="bg-red-800 text-white px-2 py-0.5 mr-3 text-sm font-bold pixel-border shrink-0">望诊 (舌)</span>
+                      <span>{patientData.appearance.tongue}</span>
+                    </div>
+                    <div className="flex items-start">
+                       <span className="bg-blue-800 text-white px-2 py-0.5 mr-3 text-sm font-bold pixel-border shrink-0">切诊 (脉)</span>
+                      <span>{patientData.appearance.pulse}</span>
+                    </div>
+                  </div>
+                </PixelCard>
+              </div>
+            </div>
+          );
+        };
+
+        const DialogueBox = ({ text }) => {
+          const [displayedText, setDisplayedText] = useState('');
+          
+          useEffect(() => {
+            setDisplayedText('');
+            let i = 0;
+            // Faster typing speed for better UX
+            const timer = setInterval(() => {
+              if (i < text.length) {
+                setDisplayedText((prev) => prev + text.charAt(i));
+                i++;
+              } else {
+                clearInterval(timer);
+              }
+            }, 20);
+            return () => clearInterval(timer);
+          }, [text]);
+
+          return (
+            <div className="w-full max-w-4xl mx-auto mt-4">
+              <PixelCard variant="dark">
+                <div className="font-bold pixel-font-zh text-xl md:text-2xl leading-relaxed min-h-[100px] tracking-wide text-white">
+                  <div className="mb-2">
+                    <span className="bg-yellow-600 text-black px-2 py-1 text-base md:text-lg border-2 border-white shadow-[2px_2px_0_0_#fff] inline-block mr-2">
+                      ▶ 患者主诉
+                    </span>
+                  </div>
+                  <div className="drop-shadow-[0_2px_0_rgba(0,0,0,1)] pl-2">
+                    {displayedText}
+                    <span className="animate-pulse text-yellow-400 font-black ml-1">_</span>
+                  </div>
+                </div>
+              </PixelCard>
+            </div>
+          );
+        };
+
+        const OptionsPanel = ({ tcmCase, onSelect, disabled }) => {
+          const shuffledOptions = useMemo(() => {
+            const all = [...tcmCase.wrongOptions, tcmCase.correctDiagnosis];
+            return all.sort(() => Math.random() - 0.5);
+          }, [tcmCase]);
+
+          return (
+            <div className="w-full max-w-4xl mx-auto mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+              {shuffledOptions.map((option, idx) => (
+                <button
+                  key={idx}
+                  disabled={disabled}
+                  onClick={() => onSelect(option)}
+                  className={`
+                    pixel-border p-4 text-left transition-all relative group
+                    ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:-translate-y-1 hover:bg-amber-100 active:translate-y-1 active:shadow-none cursor-pointer bg-white'}
+                    shadow-[4px_4px_0_0_rgba(0,0,0,1)]
+                  `}
+                >
+                  <div className="flex items-center">
+                     <span className="bg-gray-800 text-white w-8 h-8 flex items-center justify-center font-bold mr-3 pixel-border text-sm">
+                       {String.fromCharCode(65 + idx)}
+                     </span>
+                     <span className="text-lg font-bold text-gray-900 pixel-font-zh">{option}</span>
+                  </div>
+                  {!disabled && (
+                    <div className="absolute inset-0 border-2 border-transparent group-hover:border-amber-600 pointer-events-none"></div>
+                  )}
+                </button>
+              ))}
+            </div>
+          );
+        };
+
+        // --- MAIN APP ---
+        const App = () => {
+          const [gameState, setGameState] = useState('MENU'); // MENU, PLAYING, FEEDBACK, GAME_OVER
+          const [currentCase, setCurrentCase] = useState(null);
+          const [stats, setStats] = useState({ score: 0, lives: 3, streak: 0 });
+          const [selectedOption, setSelectedOption] = useState(null);
+
+          // Immediate load, no async needed
+          const loadNewCase = useCallback(() => {
+            setSelectedOption(null);
+            const newCase = generateLocalCase();
+            setCurrentCase(newCase);
+            setGameState('PLAYING');
+          }, []);
+
+          const handleStartGame = () => {
+            setStats({ score: 0, lives: 3, streak: 0 });
+            loadNewCase();
+          };
+
+          const handleAnswer = (answer) => {
+            setSelectedOption(answer);
+            setGameState('FEEDBACK');
+            
+            const isCorrect = answer === currentCase?.correctDiagnosis;
+            
+            if (isCorrect) {
+              setStats(prev => ({
+                ...prev,
+                score: prev.score + 100 + (prev.streak * 10),
+                streak: prev.streak + 1
+              }));
+            } else {
+              setStats(prev => ({
+                ...prev,
+                lives: prev.lives - 1,
+                streak: 0
+              }));
+            }
+          };
+
+          const handleNext = () => {
+            if (stats.lives <= 0) {
+              setGameState('GAME_OVER');
+            } else {
+              loadNewCase();
+            }
+          };
+
+          if (gameState === 'MENU') {
+            return (
+              <div className="min-h-screen flex items-center justify-center p-4 bg-[#2d2a2e] bg-[radial-gradient(circle,rgba(45,42,46,1)_0%,rgba(20,20,20,1)_100%)]">
+                <div className="max-w-md w-full text-center">
+                  <h1 className="text-5xl md:text-7xl font-bold text-[#e0e0e0] mb-2 font-serif tracking-tighter drop-shadow-[4px_4px_0_rgba(180,50,50,1)]">
+                    中医诊室
+                  </h1>
+                  <h2 className="text-xl md:text-2xl text-amber-500 mb-12 font-mono tracking-widest">TCM DIAGNOSIS SIM</h2>
+                  
+                  <PixelCard className="bg-amber-100">
+                    <p className="mb-6 text-gray-800 text-lg pixel-font-zh">
+                      <span className="block mb-2 font-bold text-xl border-b-2 border-black pb-1">无限模式 (Endless)</span>
+                      内置海量病例库。<br/>
+                      请根据<span className="font-bold text-red-700">四诊信息</span>进行辨证。
+                    </p>
+                    <button 
+                      onClick={handleStartGame}
+                      className="w-full bg-red-700 text-white text-2xl font-bold py-4 px-8 border-4 border-black shadow-[4px_4px_0_0_#000] hover:translate-y-1 hover:shadow-none active:bg-red-800 transition-all pixel-font-zh"
+                    >
+                      开始接诊 (START)
+                    </button>
+                  </PixelCard>
+                </div>
+              </div>
+            );
+          }
+
+          if (gameState === 'GAME_OVER') {
+            return (
+              <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-red-950 text-white">
+                <h1 className="text-6xl font-bold mb-8 font-mono text-red-500 drop-shadow-[4px_4px_0_#000]">GAME OVER</h1>
+                <PixelCard className="bg-white text-black text-center w-full max-w-md">
+                  <div className="mb-4">
+                    <div className="text-2xl font-bold pixel-font-zh mb-2">最终得分</div>
+                    <div className="text-5xl font-mono text-blue-800">{stats.score}</div>
+                  </div>
+                  <button 
+                    onClick={handleStartGame}
+                    className="mt-6 bg-blue-600 text-white px-8 py-3 font-bold border-4 border-black shadow-[4px_4px_0_0_#000] hover:translate-y-1 hover:shadow-none"
+                  >
+                    再次挑战 (RETRY)
+                  </button>
+                </PixelCard>
+              </div>
+            );
+          }
+
+          return (
+            <div className="min-h-screen bg-[#C2B280] p-4 md:p-8 flex flex-col font-sans transition-colors duration-500">
+              {/* Header Stats */}
+              <div className="max-w-4xl mx-auto w-full flex justify-between items-center mb-6 bg-gray-900 text-white p-3 border-b-4 border-black shadow-lg">
+                <div className="flex items-center space-x-4">
+                  <div className="flex flex-col">
+                    <span className="text-xs text-gray-400">SCORE</span>
+                    <span className="text-xl md:text-2xl font-mono text-yellow-400 leading-none">{stats.score.toString().padStart(5, '0')}</span>
+                  </div>
+                </div>
+                <div className="flex space-x-2">
+                   {Array.from({ length: Math.max(0, stats.lives) }).map((_, i) => (
+                     <div key={i} className="w-6 h-6 bg-red-500 border-2 border-white shadow-[2px_2px_0_0_#000]"></div>
+                   ))}
+                </div>
+              </div>
+
+              {/* Main Game Area */}
+              {currentCase && (
+                <div className="flex-1 flex flex-col animate-[fadeIn_0.5s_ease-out]">
+                  <PatientView patientData={currentCase} />
+                  
+                  <DialogueBox text={currentCase.complaint} />
+                  
+                  {gameState === 'PLAYING' && (
+                    <OptionsPanel 
+                      tcmCase={currentCase} 
+                      onSelect={handleAnswer} 
+                      disabled={false}
+                    />
+                  )}
+
+                  {gameState === 'FEEDBACK' && (
+                    <div className="w-full max-w-4xl mx-auto mt-6 animate-[fadeIn_0.3s_ease-out]">
+                      <PixelCard 
+                        title={selectedOption === currentCase.correctDiagnosis ? "诊断正确 (CORRECT)" : "诊断错误 (WRONG)"} 
+                        variant={selectedOption === currentCase.correctDiagnosis ? "success" : "danger"}
+                      >
+                        <div className="flex flex-col gap-4">
+                          <div className="text-lg pixel-font-zh font-bold">
+                            {selectedOption === currentCase.correctDiagnosis 
+                              ? "太棒了！辨证准确。" 
+                              : `很遗憾。正确诊断应为：${currentCase.correctDiagnosis}`}
+                          </div>
+                          <div className="bg-white/50 p-3 border-l-4 border-black/20 text-gray-900 text-sm md:text-base leading-relaxed">
+                            <span className="font-bold block mb-1">【解析 Explaination】</span>
+                            {currentCase.explanation}
+                          </div>
+                          <div className="flex justify-end mt-2">
+                            <button 
+                              onClick={handleNext}
+                              className="bg-gray-900 text-white px-6 py-2 border-2 border-black shadow-[3px_3px_0_0_#fff] hover:translate-y-1 hover:shadow-none font-mono"
+                            >
+                              {stats.lives > 0 ? "下一位病人 (NEXT) ->" : "查看结果 (FINISH)"}
+                            </button>
+                          </div>
+                        </div>
+                      </PixelCard>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
 </html>
